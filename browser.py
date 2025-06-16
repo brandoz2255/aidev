@@ -1,4 +1,3 @@
-
 import atexit
 from pathlib import Path
 from selenium import webdriver
@@ -13,6 +12,7 @@ import time
 import logging
 import json
 from typing import Optional, List
+from urllib.parse import quote
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -41,7 +41,7 @@ def _detect_captcha(driver) -> bool:
         "//div[contains(@class, 'captcha')]",
         "//img[contains(@src, 'captcha')]"
     ]
-    
+
     for indicator in captcha_indicators:
         try:
             if driver.find_elements(By.XPATH, indicator):
@@ -81,10 +81,10 @@ def _init_driver(headless: bool = False, proxy: Optional[str] = None):
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.set_preference("dom.webdriver.enabled", False)
         options.set_preference("useAutomationExtension", False)
-        
+
         # Set random user agent
         options.set_preference("general.useragent.override", random.choice(USER_AGENTS))
-        
+
         # Add proxy if provided
         if proxy:
             options.set_preference("network.proxy.type", 1)
@@ -100,10 +100,10 @@ def _init_driver(headless: bool = False, proxy: Optional[str] = None):
 
         service = FirefoxService(executable_path=GeckoDriverManager().install())
         _driver = webdriver.Firefox(service=service, options=options)
-        
+
         # Set window size to a reasonable default
         _driver.set_window_size(1280, 800)
-        
+
         # Add random viewport size
         viewport_width = random.randint(1024, 1920)
         viewport_height = random.randint(768, 1080)
@@ -151,18 +151,17 @@ def search_google(query: str, headless: bool = False, proxy: Optional[str] = Non
 
     try:
         # URL encode the query
-        from urllib.parse import quote
         encoded_query = quote(query)
         google_url = f"https://www.google.com/search?q={encoded_query}"
-        
+
         # Add random delay before search
         _random_delay(2.0, 4.0)
-        
+
         result = open_new_tab(google_url, headless=headless, proxy=proxy)
-        
+
         # Add random delay after search
         _random_delay(1.0, 2.0)
-        
+
         return result
     except Exception as e:
         error_msg = f"Failed to perform Google search: {str(e)}"
@@ -177,16 +176,74 @@ def navigate_to(url: str, headless: bool = False, proxy: Optional[str] = None) -
     try:
         driver = _init_driver(headless=headless, proxy=proxy)
         _random_delay()
-        
+
         driver.get(url)
-        
+
         # Check for CAPTCHA
         if not _handle_captcha(driver):
             return "⚠️ CAPTCHA detected and not solved. Please try again."
-            
+
         logger.info(f"Successfully navigated to: {url}")
         return f"✅ Navigated to: {url}"
     except WebDriverException as e:
         error_msg = f"Failed to navigate to URL: {str(e)}"
         logger.error(error_msg)
         raise RuntimeError(error_msg)
+
+def execute_nlp_browser_command(command: str, headless: bool = False, proxy: Optional[str] = None) -> str:
+    """
+    Execute browser command based on NLP processed input.
+    Args:
+        command (str): The natural language command to process
+        headless (bool): Whether to run in headless mode
+        proxy (Optional[str]): Proxy server for the browser session
+
+    Returns:
+        str: Result message of the executed action
+    """
+    import re
+
+    # Normalize and lower-case the input
+    command_lower = command.lower().strip()
+
+    # Define regex patterns for different commands
+    open_tab_patterns = [
+        r'^open a new tab and go to (.+)',
+        r'^launch a new tab and navigate to (.+)'
+    ]
+
+    search_patterns = [
+        r'search for (.+)$',
+        r'look up (.+)$',
+        r'find (.+)$',
+        r'what is (.+)$',
+        r'tell me about (.+)$'
+    ]
+
+    # Check for URL in command
+    url_pattern = re.compile(r'(?:https?:\/\/)?(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*)')
+
+    # Extract URL if present
+    url_match = re.search(url_pattern, command)
+    if url_match:
+        url = url_match.group()
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+        return open_new_tab(url, headless=headless, proxy=proxy)
+
+    # Check for open tab commands
+    for pattern in open_tab_patterns:
+        match = re.search(pattern, command_lower)
+        if match:
+            url = match.group(1).strip()
+            return open_new_tab(url, headless=headless, proxy=proxy)
+
+    # Check for search commands
+    for pattern in search_patterns:
+        match = re.search(pattern, command_lower)
+        if match:
+            query = match.group(1).strip()
+            return search_google(query, headless=headless, proxy=proxy)
+
+    # Default: Try to interpret as a URL and open it
+    return navigate_to(command, headless=headless, proxy=proxy)

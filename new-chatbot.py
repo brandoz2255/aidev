@@ -8,7 +8,7 @@ import soundfile as sf
 import re
 from transformers import pipeline
 from chatterbox.tts import ChatterboxTTS, punc_norm
-from browser import open_new_tab, search_google, navigate_to  # Import all browser functions
+from browser import execute_nlp_browser_command  # Import the new NLP command function
 
 # NOTE: This application requires the 'ffmpeg' command-line tool for audio processing.
 # Please install it using your system's package manager (e.g., `sudo apt install ffmpeg`).
@@ -194,36 +194,36 @@ def extract_url(text):
 def is_browser_command(message):
     """Determine if the message is actually a browser command."""
     message_lower = message.lower().strip()
-    
+
     # Common browser command patterns
     browser_patterns = [
         r'^(?:please\s+)?(?:can\s+you\s+)?(?:open|launch|start)\s+(?:a\s+)?(?:new\s+)?(?:browser\s+)?(?:tab|window)',
         r'^(?:please\s+)?(?:can\s+you\s+)?(?:search|look\s+up|find)\s+(?:for\s+)?(?:information\s+about\s+)?',
         r'^(?:please\s+)?(?:can\s+you\s+)?(?:go\s+to|navigate\s+to|visit|open)\s+(?:the\s+)?(?:website\s+)?(?:at\s+)?',
     ]
-    
+
     # Check if the message matches any browser command pattern
     for pattern in browser_patterns:
         if re.match(pattern, message_lower):
             return True
-    
+
     # Check for URL presence
     if extract_url(message):
         return True
-        
+
     return False
 
 def extract_search_query(message):
     """Extract search query from message using improved pattern matching."""
     message_lower = message.lower().strip()
-    
+
     # Common search patterns
     search_patterns = [
         r'(?:search|look\s+up|find)\s+(?:for\s+)?(?:information\s+about\s+)?(.+)',
         r'(?:what\s+is|who\s+is|where\s+is|how\s+to)\s+(.+)',
         r'(?:tell\s+me\s+about|show\s+me\s+information\s+about)\s+(.+)',
     ]
-    
+
     for pattern in search_patterns:
         match = re.search(pattern, message_lower)
         if match:
@@ -231,7 +231,7 @@ def extract_search_query(message):
             # Remove common question words and phrases
             query = re.sub(r'^(?:please|can you|could you|would you|will you)\s+', '', query)
             return query
-    
+
     return None
 
 # ─── Chat with Voice ────────────────────────────────────────────────────────────
@@ -242,67 +242,40 @@ def chat_with_voice(message, history, selected_model,
         return history, None
 
     # First, check if this is actually a browser command
-    if not is_browser_command(message):
-        # If not a browser command, proceed with normal chat
+    if is_browser_command(message):
         try:
-            response = requests.post(
-                f"{OLLAMA_URL}/api/generate",
-                json={
-                    "model": selected_model,
-                    "prompt": message,
-                    "stream": False
-                }
-            )
-            if response.ok:
-                response_text = response.json().get("response", "").strip()
-                history.append({"role": "assistant", "content": response_text})
-                return history, generate_speech(response_text, load_tts_model(), 
-                                             audio_prompt, exaggeration, temperature, cfg_weight)
+            response = execute_nlp_browser_command(message)
+            response_msg = f"I'll perform that action for you: {response}"
+            history.append({"role": "assistant", "content": response_msg})
+            return history, generate_speech(response_msg, load_tts_model(),
+                                         audio_prompt, exaggeration, temperature, cfg_weight)
         except Exception as e:
-            logger.error(f"Error in chat: {e}")
-            error_msg = "I'm having trouble processing your request. Could you please try again?"
+            error_msg = f"I'm sorry, I couldn't perform that action. Please try again with a different command."
             history.append({"role": "assistant", "content": error_msg})
-            return history, generate_speech(error_msg, load_tts_model(), 
+            return history, generate_speech(error_msg, load_tts_model(),
                                          audio_prompt, exaggeration, temperature, cfg_weight)
 
-    # Handle browser commands
-    message_lower = message.lower().strip()
-    
-    # Check for URL
-    url = extract_url(message)
-    if url:
-        try:
-            response = open_new_tab(url)
-            response_msg = f"I'll open that website for you. {response}"
-            history.append({"role": "assistant", "content": response_msg})
-            return history, generate_speech(response_msg, load_tts_model(), 
+    # If not a browser command, proceed with normal chat
+    try:
+        response = requests.post(
+            f"{OLLAMA_URL}/api/generate",
+            json={
+                "model": selected_model,
+                "prompt": message,
+                "stream": False
+            }
+        )
+        if response.ok:
+            response_text = response.json().get("response", "").strip()
+            history.append({"role": "assistant", "content": response_text})
+            return history, generate_speech(response_text, load_tts_model(),
                                          audio_prompt, exaggeration, temperature, cfg_weight)
-        except Exception as e:
-            error_msg = "I'll try to open that for you, but there was a small issue. Let me know if you need anything else!"
-            history.append({"role": "assistant", "content": error_msg})
-            return history, generate_speech(error_msg, load_tts_model(), 
-                                         audio_prompt, exaggeration, temperature, cfg_weight)
-    
-    # Check for search query
-    query = extract_search_query(message)
-    if query:
-        try:
-            response = search_google(query)
-            response_msg = f"I'm searching for '{query}' for you right now."
-            history.append({"role": "assistant", "content": response_msg})
-            return history, generate_speech(response_msg, load_tts_model(), 
-                                         audio_prompt, exaggeration, temperature, cfg_weight)
-        except Exception as e:
-            error_msg = "I'll try to search that for you. Let me know if you need anything else!"
-            history.append({"role": "assistant", "content": error_msg})
-            return history, generate_speech(error_msg, load_tts_model(), 
-                                         audio_prompt, exaggeration, temperature, cfg_weight)
-    
-    # If no specific command is detected, ask for clarification
-    response_msg = "I'm not sure what you'd like me to do. Could you please be more specific?"
-    history.append({"role": "assistant", "content": response_msg})
-    return history, generate_speech(response_msg, load_tts_model(), 
-                                 audio_prompt, exaggeration, temperature, cfg_weight)
+    except Exception as e:
+        logger.error(f"Error in chat: {e}")
+        error_msg = "I'm having trouble processing your request. Could you please try again?"
+        history.append({"role": "assistant", "content": error_msg})
+        return history, generate_speech(error_msg, load_tts_model(),
+                                     audio_prompt, exaggeration, temperature, cfg_weight)
 
 # ─── Transcribe & Chat (Voice) ──────────────────────────────────────────────────
 def transcribe_and_chat(audio_path, history,
@@ -319,34 +292,13 @@ def transcribe_and_chat(audio_path, history,
         logger.info(f"Transcription: {transcription}")
 
         # Check for browser commands in voice input
-        if transcription.lower().startswith("open new tab"):
-            url = transcription[len("open new tab"):].strip()
+        if is_browser_command(transcription):
             try:
-                response = open_new_tab(url)
+                response = execute_nlp_browser_command(transcription)
                 history.append({"role": "assistant", "content": response})
                 return history, None, response, None
             except Exception as e:
-                error_msg = f"I'm sorry, I couldn't open the tab. Please make sure the URL is correct and try again."
-                history.append({"role": "assistant", "content": error_msg})
-                return history, None, error_msg, None
-        elif transcription.lower().startswith("search"):
-            query = transcription[len("search"):].strip()
-            try:
-                response = search_google(query)
-                history.append({"role": "assistant", "content": response})
-                return history, None, response, None
-            except Exception as e:
-                error_msg = f"I'm sorry, I couldn't perform the search. Please make sure your query is correct and try again."
-                history.append({"role": "assistant", "content": error_msg})
-                return history, None, error_msg, None
-        elif transcription.lower().startswith("go to"):
-            url = transcription[len("go to"):].strip()
-            try:
-                response = navigate_to(url)
-                history.append({"role": "assistant", "content": response})
-                return history, None, response, None
-            except Exception as e:
-                error_msg = f"I'm sorry, I couldn't navigate to the URL. Please make sure the URL is correct and try again."
+                error_msg = f"I'm sorry, I couldn't perform that action. Please try again with a different command."
                 history.append({"role": "assistant", "content": error_msg})
                 return history, None, error_msg, None
 
