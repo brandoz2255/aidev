@@ -84,4 +84,5 @@ volumes:
 
 networks:
   ollama-n8n-network: # Define the custom bridge network
+    name: ollama-n8n-network
     driver: bridge

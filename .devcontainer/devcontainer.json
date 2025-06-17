@@ -1,18 +1,42 @@
 {
-  "name": "fullstack-dev-env",
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
+  "name": "aidev-fullstack",
+  "dockerFile": "Dockerfile",
+  "context": "..",
+
+  // 🧩 Join Ollama network so you can talk to it via "http://ollama:11434"
+  "runArgs": [
+    "--network=ollama-n8n-network"
+  ],
+
+  // 📦 Mount volume for Ollama model sharing
+  "mounts": [
+    "source=ollama,target=/root/.ollama,type=volume"
+  ],
+
+  // ⚙️ VS Code / Python Settings
   "settings": {
     "terminal.integrated.defaultProfile.linux": "bash",
     "python.defaultInterpreterPath": "/usr/local/bin/python"
   },
-  "extensions": [
-    "ms-python.python",
-    "ms-toolsai.jupyter",
-    "esbenp.prettier-vscode",
-    "dbaeumer.vscode-eslint"
-  ],
-  "postCreateCommand": "echo '✔️ Dev container ready!'",
-  "remoteUser": "root"
+
+  // 🔧 Post-create setup
+  "postCreateCommand": "pip install -r requirements.txt && echo '✔️ Dev container ready!'",
+
+  // 👤 Make sure we run as root (can be changed later)
+  "remoteUser": "root",
+
+  // 🧠 VS Code Features (opt-in)
+  "features": {},
+
+  // 🎨 Extensions for Python + JS work
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  }
 }
