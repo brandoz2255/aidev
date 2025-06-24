@@ -1,65 +1,72 @@
 """
-FastAPI back-end  – fixed audio-path + minor tidy-ups
+FastAPI back-end with Chatterbox-TTS voice-cloning (Jarvis voice)
+----------------------------------------------------------------
+Put jarvis_voice.mp3 in the project root before running.
 """
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-import uvicorn
-import os, tempfile, uuid, base64, io, logging, re, requests
+import uvicorn, os, tempfile, uuid, base64, io, logging, re, requests, random
 from typing import List, Optional, Dict, Any
+
 from pydantic import BaseModel
 from PIL import Image
 import torch, soundfile as sf
 from transformers import pipeline
+import whisper  # Import Whisper
 
-from chatterbox_tts import load_tts_model, generate_speech
+# ─── Local helper --------------------------------------------------------------
+from chatterbox_tts import load_tts_model, generate_speech   # see second file below
 
-# ─── Logging ────────────────────────────────────────────────────────────────────
+# ─── Logging -------------------------------------------------------------------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ─── Paths ─────────────────────────────────────────────────────────────────────
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-FRONTEND_DIR = os.path.join(PROJECT_ROOT, "front_end")
+# ─── Paths ---------------------------------------------------------------------
+PROJECT_ROOT        = os.path.dirname(os.path.abspath(__file__))
+FRONTEND_DIR        = os.path.join(PROJECT_ROOT, "front_end")
+JARVIS_VOICE_PATH   = os.path.abspath("jarvis_voice.mp3")  # Point to the file in project root
 
-# ─── FastAPI init ──────────────────────────────────────────────────────────────
-app = FastAPI()
+# ─── FastAPI init --------------------------------------------------------------
+app = FastAPI(title="Jarves-TTS API")
 
 if os.path.exists(FRONTEND_DIR):
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
-    logger.info(f"Frontend directory mounted at {FRONTEND_DIR}")
+    logger.info("Frontend directory mounted at %s", FRONTEND_DIR)
 
-# ─── Device & models ───────────────────────────────────────────────────────────
-device = "cuda" if torch.cuda.is_available() else "cpu"
-logger.info("Using device: %s", device)
+# ─── Device & models -----------------------------------------------------------
+device = 0 if torch.cuda.is_available() else -1
+logger.info("Using device: %s", "cuda" if device == 0 else "cpu")
 
 try:
-    logger.info("Loading image analysis model …")
-    image_to_text = pipeline("image-to-text",
-                             model="Salesforce/blip-image-captioning-base",
-                             device=device)
+    logger.info("Loading image captioning model …")
+    image_to_text = pipeline(
+        "image-to-text",
+        model="Salesforce/blip-image-captioning-base",
+        device=device
+    )
 except Exception as e:
-    logger.error("Image model load failed: %s", e)
+    logger.error("BLIP model failed: %s", e)
     image_to_text = None
 
-# ─── Config ────────────────────────────────────────────────────────────────────
+# ─── Config --------------------------------------------------------------------
 OLLAMA_URL     = "http://ollama:11434"
 DEFAULT_MODEL  = "mistral"
 
-# ─── Pydantic models ───────────────────────────────────────────────────────────
+# ─── Pydantic schemas ----------------------------------------------------------
 class ChatRequest(BaseModel):
     message: str
     history: List[Dict[str, Any]] = []
     model: str = DEFAULT_MODEL
-    audio_prompt: Optional[str] = None
+    audio_prompt: Optional[str] = None      # overrides JARVIS_VOICE_PATH if provided
     exaggeration: float = 0.5
     temperature: float = 0.8
     cfg_weight: float = 0.5
 
 class ScreenAnalysisRequest(BaseModel):
-    image: str
+    image: str                               # base-64 image (data-URI or raw)
 
-# ─── Helpers ───────────────────────────────────────────────────────────────────
+# ─── Helpers -------------------------------------------------------------------
 BROWSER_PATTERNS = [
     r'^(?:open|launch|go\s+to|navigate\s+to|take\s+me\s+to|visit)\s+',
     r'^(?:abre|abrír|navega\s+a|llévame\s+a|visita)\s+',
@@ -68,128 +75,166 @@ BROWSER_PATTERNS = [
     r'^(?:open|create)\s+(?:\d+\s+)?(?:new\s+)?tabs?',
     r'^(?:abre|crea)\s+(?:\d+\s+)?(?:nueva[s]?\s+)?pestaña[s]?'
 ]
-def is_browser_command(text: str) -> bool:
-    return any(re.match(p, text.lower().strip()) for p in BROWSER_PATTERNS)
+is_browser_command = lambda txt: any(re.match(p, txt.lower().strip()) for p in BROWSER_PATTERNS)
 
-# ─── Routes ────────────────────────────────────────────────────────────────────
-@app.get("/")
-async def root():
+# ─── Routes --------------------------------------------------------------------
+@app.get("/", tags=["frontend"])
+async def root() -> FileResponse:
     index_html = os.path.join(FRONTEND_DIR, "index.html")
     if os.path.exists(index_html):
         return FileResponse(index_html)
     raise HTTPException(404, "Frontend not found")
 
-@app.post("/chat")
-async def chat_legacy(req: ChatRequest):
-    return await chat(req)         # backward-compat shim
-
-@app.post("/api/chat")
+@app.post("/api/chat", tags=["chat"])
 async def chat(req: ChatRequest, request: Request):
     """
-    Main chat endpoint
+    Main conversational endpoint.
+    Produces: JSON {history, audio_path}
     """
     try:
+        # ── 1. Update dialogue history with the latest user turn
         history = req.history + [{"role": "user", "content": req.message}]
+        response_text: str
 
-        # A) Browser commands delegated to helper (if present)
+        # ── 2. Browser automation branch -------------------------------------------------
         if is_browser_command(req.message):
             try:
                 from trash.browser import smart_url_handler, search_google, open_new_tab
                 result = smart_url_handler(req.message)
-                response_text = (search_google(result["query"])
-                                 if isinstance(result, dict) and result.get("type") == "search"
-                                 else open_new_tab(result))
+                response_text = (
+                    search_google(result["query"])
+                    if isinstance(result, dict) and result.get("type") == "search"
+                    else open_new_tab(result)
+                )
             except Exception as e:
-                logger.error("Browser command error: %s", e)
-                response_text = "¡Ay! Hubo un problema con esa acción de navegador."
-        # B) Normal LLM call
+                logger.error("Browser cmd failed: %s", e)
+                response_text = "¡Ay! Hubo un problema con esa acción del navegador."
+        # ── 3. LLM generation branch ------------------------------------------------------
         else:
             system_prompt = (
-                'You are "Jarves", a voice-first local assistant. Reply in ≤25 spoken-style words, '
-                'sprinkling brief Spanish when natural. Begin each answer with a short verbal '
-                'acknowledgment (e.g., "Claro," "¡Por supuesto!", "Right away").'
+                'You are "Jarves", a voice-first local assistant. '
+                'Reply in ≤25 spoken-style words, sprinkling brief Spanish when natural. '
+                'Begin each answer with a short verbal acknowledgment (e.g., "Claro,", "¡Por supuesto!", "Right away").'
             )
             resp = requests.post(
                 f"{OLLAMA_URL}/api/generate",
                 json={
-                    "model": req.model,
+                    "model": req.model or DEFAULT_MODEL,
                     "prompt": req.message,
                     "system": system_prompt,
                     "stream": False
                 },
-                timeout=60
+                timeout=90
             )
             resp.raise_for_status()
             response_text = resp.json().get("response", "").strip()
 
-        # ── Update history
+        # ── 4. Update history with assistant reply
         new_history = history + [{"role": "assistant", "content": response_text}]
 
-        # ── TTS synthesis
-        tts = load_tts_model()
+        # ── 5. Text-to-speech -----------------------------------------------------------
+        tts = load_tts_model()                # lazy global singleton
+
+        # Handle audio prompt path
+        audio_prompt_path = req.audio_prompt or JARVIS_VOICE_PATH
+        if not os.path.isfile(audio_prompt_path):
+            logger.warning("Audio prompt %s not found, falling back to default voice.", audio_prompt_path)
+            audio_prompt_path = None
+
+        # Debug logging for the audio prompt path
+        if audio_prompt_path:
+            if not os.path.exists(audio_prompt_path):
+                logger.warning(f"JARVIS voice prompt missing at: {audio_prompt_path}")
+            else:
+                logger.info(f"Cloning voice using prompt: {audio_prompt_path}")
+
         sr, wav = generate_speech(
-            response_text, tts,
-            req.audio_prompt, req.exaggeration,
-            req.temperature, req.cfg_weight
+            text=response_text,
+            model=tts,
+            audio_prompt=audio_prompt_path,
+            exaggeration=req.exaggeration,
+            temperature=req.temperature,
+            cfg_weight=req.cfg_weight
         )
 
-        # ── Save to /tmp so nginx alias can serve it
+        # ── 6. Persist WAV to /tmp so nginx (or FastAPI fallback) can serve it ------------
         filename   = f"response_{uuid.uuid4()}.wav"
         filepath   = os.path.join(tempfile.gettempdir(), filename)
         sf.write(filepath, wav, sr)
+        logger.info("Audio written to %s", filepath)
 
-        logger.info(f"Generated audio file: {filepath}")
-        if not os.path.exists(filepath):
-            logger.error(f"ERROR: Audio file was not created at expected path: {filepath}")
-
-        # NOTE: leading slash makes it absolute for the browser
-        return {"history": new_history,
-                "audio_path": f"/audio/{filename}"}
+        return {
+            "history": new_history,
+            "audio_path": f"/api/audio/{filename}"   # FastAPI route below (or nginx alias /audio/)
+        }
 
     except Exception as e:
-        logger.exception("Chat endpoint failed")
+        logger.exception("Chat endpoint crashed")
         raise HTTPException(500, str(e)) from e
 
-@app.get("/api/audio/{filename}")
+@app.get("/api/audio/{filename}", tags=["audio"])
 async def serve_audio(filename: str):
     """
-    Direct FastAPI fallback (not used when nginx /audio alias is active)
+    FastAPI static audio fallback (use nginx /audio alias in production for speed).
     """
     full_path = os.path.join(tempfile.gettempdir(), filename)
-    logger.info(f"Serving audio file: {full_path}")
     if not os.path.exists(full_path):
-        logger.error(f"ERROR: Audio file not found at: {full_path}")
         raise HTTPException(404, f"Audio file not found: {filename}")
-    if os.path.exists(full_path):
-        return FileResponse(full_path, media_type="audio/wav")
-    raise HTTPException(404, "Audio not found")
+    return FileResponse(full_path, media_type="audio/wav")
 
-@app.post("/api/analyze-screen")
+@app.post("/api/analyze-screen", tags=["vision"])
 async def analyze_screen(req: ScreenAnalysisRequest):
     try:
-        # Decode base-64 image
-        img_data = req.image.split(",", 1)[-1]
+        img_data = req.image.split(",", 1)[-1]   # works for data URI or raw b64
         image    = Image.open(io.BytesIO(base64.b64decode(img_data)))
 
         if image_to_text:
-            result = image_to_text(image)
-            caption = result[0].get("generated_text", "") if result else ""
+            caption = image_to_text(image)[0].get("generated_text", "")
             if caption:
                 prefixes = [
-                    "Looking at your screen, ",
-                    "I notice that ",
-                    "On your screen, ",
-                    "I can see that ",
-                    "Currently, "
+                    "Looking at your screen, ", "I notice that ",
+                    "On your screen, ", "I can see that ", "Currently, "
                 ]
-                import random
                 return {"commentary": random.choice(prefixes) + caption.lower()}
 
         return {"commentary": "I'm having trouble analyzing the screen content right now."}
     except Exception as e:
         logger.error("Screen analysis failed: %s", e)
+        raise HTTPException(500, str(e)) from e
+
+# Load Whisper (once, at the top)
+whisper_model = whisper.load_model("base")  # or "small", "medium", "large"
+
+@app.post("/api/mic-chat", tags=["voice"])
+async def mic_chat(file: UploadFile = File(...)):
+    try:
+        # Save uploaded file to temp
+        contents = await file.read()
+        tmp_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.wav")
+        with open(tmp_path, "wb") as f:
+            f.write(contents)
+
+        # Transcribe it
+        result = whisper_model.transcribe(tmp_path)
+        message = result.get("text", "").strip()
+        logger.info(f"MIC input transcribed: {message}")
+
+        if not message:
+            raise HTTPException(400, "Could not transcribe anything.")
+
+        # Now use existing chat logic
+        chat_req = ChatRequest(message=message)
+        return await chat(chat_req, request=None)
+
+    except Exception as e:
+        logger.exception("Mic chat failed")
         raise HTTPException(500, str(e))
 
-# ─── Main (dev) ────────────────────────────────────────────────────────────────
+# ─── Dev entry-point -----------------------------------------------------------
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True
+    )

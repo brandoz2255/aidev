@@ -12,13 +12,10 @@ RUN apt-get update && apt-get install -y \
 
 # Install core dependencies first
 RUN pip install --no-cache-dir \
-    chatterbox-tts 
-    #selenium-stealth \
-    #webdriver-manager \
-    #fastapi \
-    #uvicorn
+    chatterbox-tts \
+    openai-whisper
 
-#Copy requirements first to leverage Docker cache
+# Copy requirements first to leverage Docker cache
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
