@@ -1,15 +1,22 @@
- 
-
 services:
   backend:
     build:
-      context: ./python_back_end
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: python_back_end/Dockerfile
     container_name: backend
     ports:
       - "8000:8000"
+    volumes:
+      - ./python_back_end:/app
+      - ./front_end:/app/front_end
+      - /tmp:/tmp
+    gpus: all  # <-- Enable GPU access
+    environment:
+      - PYTHONPATH=/app
+      - NVIDIA_VISIBLE_DEVICES=all
+      - OLLAMA_FLASH_ATTENTION=1
     networks:
-      - webnet
+      - ollama-n8n-network
     restart: unless-stopped
 
   frontend:
@@ -18,8 +25,12 @@ services:
       dockerfile: Dockerfile
     container_name: frontend
     networks:
-      - webnet
+      - ollama-n8n-network
     restart: unless-stopped
+
+
+
+
 
   nginx:
     image: nginx:alpine
@@ -31,10 +42,17 @@ services:
     depends_on:
       - frontend
       - backend
+
     networks:
-      - webnet
+      - ollama-n8n-network
     restart: unless-stopped
 
+volumes:
+  ollama:
+  n8n_data:
+  tmp:
+
 networks:
-  webnet:
+  ollama-n8n-network:
+    name: ollama-n8n-network
     driver: bridge
