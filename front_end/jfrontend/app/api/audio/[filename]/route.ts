@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-const BACKEND_API = process.env.BACKEND_URL || "http://localhost:8000"
+const BACKEND_API = process.env.BACKEND_URL || "http://backend:8000"
 
 export async function GET(request: NextRequest, { params }: { params: { filename: string } }) {
   try {
