@@ -19,3 +19,5 @@ def query_mistral(prompt: str, system_prompt: str = "") -> str:
         return res.json().get("response", "").strip()
     except Exception as e:
         return f"[LLM error] {e}"
+
+## Perhaps we need to add another pipline
