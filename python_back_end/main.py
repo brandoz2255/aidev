@@ -85,6 +85,38 @@ async def root() -> FileResponse:
         return FileResponse(index_html)
     raise HTTPException(404, "Frontend not found")
 
+# Import new modules
+from screen_analyzer import analyze_image_base64
+from llm_connector import query_mistral
+
+@app.post("/api/analyze-and-respond")
+async def analyze_and_respond(req: ScreenAnalysisRequest):
+    try:
+        # Get screen analysis data
+        screen_data = analyze_image_base64(req.image)
+
+        # Check for errors
+        if "error" in screen_data:
+            return {"commentary": screen_data["error"]}
+
+        # Create prompt with both caption and OCR text
+        prompt = (
+            f"Here's what's on the user's screen:\n"
+            f"Caption: {screen_data['caption']}\n"
+            f"OCR Text (first 500 chars): {screen_data['ocr_text'][:100]}\n"
+            "What should they do next?"
+        )
+
+        # Get LLM response
+        llm_response = query_mistral(prompt)
+
+        return {
+            "commentary": screen_data["caption"],
+            "llm_response": llm_response
+        }
+    except Exception as e:
+        return {"commentary": "error", "llm_response": str(e)}
+
 @app.post("/api/chat", tags=["chat"])
 async def chat(req: ChatRequest, request: Request):
     """

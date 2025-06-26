@@ -14,6 +14,9 @@ chatterbox-tts
 soundfile
 git+https://github.com/openai/whisper.git
 # For image processing and HTTP requests
+
+pytesseract
+
 Pillow
 requests
 

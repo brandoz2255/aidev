@@ -37,4 +37,10 @@ EXPOSE 8000
 
 # ─────────────────────────────────────────────────────────────
 # ✅ Start server (use Gunicorn for prod; uvicorn for dev)
+# Set working directory inside container
+WORKDIR /app
+
+# Set the PYTHONPATH to include the app directory for module resolution
+ENV PYTHONPATH=/app
+
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
