@@ -11,14 +11,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install core dependencies first
-RUN pip install --no-cache-dir \
-    chatterbox-tts \
-    selenium-stealth \
-    webdriver-manager
+#RUN pip install --no-cache-dir \
+#    chatterbox-tts \
+#    selenium-stealth \
+#    webdriver-manager
 
 # Copy requirements first to leverage Docker cache
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements-test.txt ./
+RUN pip install --no-cache-dir -r requirements-test.txt
 
 # Copy the rest of the application
 COPY . .
@@ -27,4 +27,4 @@ COPY . .
 EXPOSE 8000
 
 # Command to run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"] 
+CMD ["uvicorn", "main2:app", "--host", "0.0.0.0", "--port", "8000"] 

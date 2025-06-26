@@ -1,14 +1,22 @@
 "use client"
 
+import { useRef } from "react"
+
 import { useState, useEffect } from "react"
 import UnifiedChatInterface from "@/components/UnifiedChatInterface"
 import CompactScreenShare from "@/components/CompactScreenShare"
 import MiscDisplay from "@/components/MiscDisplay"
 import { motion } from "framer-motion"
+import { Button } from "@/components/ui/button"
+import { Swords, Shield } from "lucide-react"
+import Link from "next/link"
 
 export default function Home() {
   const [isLoaded, setIsLoaded] = useState(false)
   const [screenAnalysis, setScreenAnalysis] = useState<string>("")
+
+  // Reference to the chat interface to add messages
+  const chatInterfaceRef = useRef<any>(null)
 
   useEffect(() => {
     setIsLoaded(true)
@@ -16,6 +24,13 @@ export default function Home() {
 
   const handleScreenAnalysis = (analysis: string) => {
     setScreenAnalysis(analysis)
+  }
+
+  const handleAnalyzeAndRespond = (response: string) => {
+    // Add the AI response to the chat interface
+    if (chatInterfaceRef.current) {
+      chatInterfaceRef.current.addAIMessage(response, "Screen Analysis")
+    }
   }
 
   return (
@@ -30,7 +45,24 @@ export default function Home() {
           <h1 className="text-6xl font-bold bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent mb-4">
             JARVIS AI
           </h1>
-          <p className="text-gray-300 text-lg">Advanced AI Assistant with Intelligent Model Orchestration</p>
+          <p className="text-gray-300 text-lg mb-6">Advanced AI Assistant with Intelligent Model Orchestration</p>
+
+          {/* Navigation Buttons */}
+          <div className="flex justify-center space-x-4 mb-8">
+            <Link href="/versus-mode">
+              <Button className="bg-gradient-to-r from-red-600 to-blue-600 hover:from-red-700 hover:to-blue-700 text-white px-6 py-3 text-lg">
+                <Swords className="w-5 h-5 mr-2" />
+                Versus Mode
+              </Button>
+            </Link>
+            <Button
+              variant="outline"
+              className="border-cyan-500 text-cyan-400 hover:bg-cyan-500/10 px-6 py-3 text-lg bg-transparent"
+            >
+              <Shield className="w-5 h-5 mr-2" />
+              Defense Mode
+            </Button>
+          </div>
         </motion.div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -41,7 +73,7 @@ export default function Home() {
             transition={{ duration: 0.8, delay: 0.2 }}
             className="lg:col-span-2"
           >
-            <UnifiedChatInterface />
+            <UnifiedChatInterface ref={chatInterfaceRef} />
           </motion.div>
 
           {/* Right Column - Screen Share and Misc Display */}
@@ -51,7 +83,7 @@ export default function Home() {
             transition={{ duration: 0.8, delay: 0.4 }}
             className="space-y-6"
           >
-            <CompactScreenShare onAnalysis={handleScreenAnalysis} />
+            <CompactScreenShare onAnalysis={handleScreenAnalysis} onAnalyzeAndRespond={handleAnalyzeAndRespond} />
             <MiscDisplay screenAnalysis={screenAnalysis} />
           </motion.div>
         </div>
@@ -59,4 +91,5 @@ export default function Home() {
     </div>
   )
 }
+
 
