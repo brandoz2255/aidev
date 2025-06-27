@@ -67,9 +67,9 @@ def execute_command(command: str) -> str:
     """
     try:
         if os.name == 'posix':  # Linux/MacOS
+            # Use shell=False and pass command as a list for security
             result = subprocess.run(
-                command,
-                shell=True,
+                ['bash', '-c', command],
                 check=True,
                 capture_output=True,
                 text=True

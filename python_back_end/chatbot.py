@@ -67,7 +67,7 @@ stt_pipeline = None
 # ─── Ollama Status & Model Fetching ─────────────────────────────────────────────
 def check_ollama_status():
     try:
-        r = requests.get(f"{OLLAMA_URL}/api/tags")
+        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=30)
         return r.ok
     except requests.exceptions.RequestException:
         return False
@@ -77,7 +77,7 @@ def fetch_ollama_models():
         logger.error("Ollama server is not running or accessible")
         return [], "⚠️ Ollama server is not running. Please start Ollama first."
     try:
-        r = requests.get(f"{OLLAMA_URL}/api/tags")
+        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=30)
         if not r.ok:
             msg = f"Error fetching models: {r.status_code} - {r.text}"
             logger.error(msg)
@@ -355,7 +355,8 @@ Current user message: {message}"""
                 "prompt": message,
                 "system": enhanced_prompt,
                 "stream": False
-            }
+            },
+            timeout=90
         )
         
         if response.ok:

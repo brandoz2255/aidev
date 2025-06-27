@@ -35,7 +35,7 @@ async def chat(request: Request):
             "model": "gemma3:1b",  # or any model you've pulled
             "prompt": prompt,
             "stream": False
-        })
+        }, timeout=90)
         response.raise_for_status()
         ollama_data = response.json()
         assistant_reply = ollama_data.get("response", "Sorry, no reply.")
