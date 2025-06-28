@@ -28,7 +28,7 @@ jobs:
         run: |
           cd front_end/jfrontend
           npm ci
-          npm audit --audit-level=moderate || true  # let build continue even if moderate issues
+          npm audit --audit-level=moderate || true
 
       - name: Lint for security 🔐
         run: |
@@ -42,7 +42,11 @@ jobs:
 
       - name: Docker build frontend 🐳
         run: |
-          docker build -t dulc3/jarvis-frontend:${{ env.VERSION }} -t dulc3/jarvis-frontend:latest ./front_end/jfrontend
+          docker build \
+            -t dulc3/jarvis-frontend:${{ env.VERSION }} \
+            -t dulc3/jarvis-frontend:latest \
+            -t dulc3/jarvis-frontend:dev \
+            ./front_end/jfrontend
 
       - name: Login to DockerHub
         uses: docker/login-action@v2
@@ -54,3 +58,4 @@ jobs:
         run: |
           docker push dulc3/jarvis-frontend:${{ env.VERSION }}
           docker push dulc3/jarvis-frontend:latest
+          docker push dulc3/jarvis-frontend:dev
