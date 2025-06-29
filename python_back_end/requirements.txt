@@ -15,7 +15,7 @@ pytesseract
 Pillow
 requests
 google-generativeai
-
+#fiixed it
 # Security fixes
 setuptools==78.1.1
 sentencepiece
