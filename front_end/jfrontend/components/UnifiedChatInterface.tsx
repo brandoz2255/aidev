@@ -2,8 +2,9 @@
 
 import type React from "react"
 
-import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from "react"
-import { motion, AnimatePresence } from "framer-motion"
+import { useState, useRef, useEffect, forwardRef, useImperativeHandle, useCallback } from "react";
+import html2canvas from "html2canvas";
+import { motion, AnimatePresence } from "framer-motion";
 import { Send, Mic, MicOff, Volume2, VolumeX, Cpu, Zap, Target, Monitor } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -52,20 +53,23 @@ const UnifiedChatInterface = forwardRef<any, {}>((props, ref) => {
     })),
     
   ]
+const addMessage = useCallback((content: string, role: "user" | "assistant", model?: string, inputType?: "text" | "voice" | "screen") => {
+    const newMessage: Message = {
+      role,
+      content,
+      timestamp: new Date(),
+      model,
+      inputType,
+    };
+    setMessages((prev) => [...prev, newMessage]);
+  }, []);
 
   // Expose method to add AI messages from external components
   useImperativeHandle(ref, () => ({
     addAIMessage: (content: string, source = "AI") => {
-      const aiMessage: Message = {
-        role: "assistant",
-        content: content,
-        timestamp: new Date(),
-        model: source,
-        inputType: "screen",
-      }
-      setMessages((prev) => [...prev, aiMessage])
+      addMessage(content, "assistant", source, "screen");
     },
-  }))
+  }));
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -97,19 +101,11 @@ const UnifiedChatInterface = forwardRef<any, {}>((props, ref) => {
 
   const sendMessage = async (inputType: "text" | "voice" = "text") => {
     if ((!inputValue.trim() && inputType === "text") || isLoading) return
+    const messageContent = inputType === "text" ? inputValue : "Voice message";
+    const optimalModel = getOptimalModel(messageContent);
 
-    const messageContent = inputType === "text" ? inputValue : "Voice message"
-    const optimalModel = getOptimalModel(messageContent)
-
-    const userMessage: Message = {
-      role: "user",
-      content: messageContent,
-      timestamp: new Date(),
-      model: optimalModel,
-      inputType,
-    }
-
-    setMessages((prev) => [...prev, userMessage])
+    addMessage(messageContent, "user", optimalModel, inputType);''
+''
     if (inputType === "text") setInputValue("")
     setIsLoading(true)
 
@@ -452,6 +448,19 @@ const UnifiedChatInterface = forwardRef<any, {}>((props, ref) => {
             } text-white`}
           >
             {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+          </Button>
+
+          <Button
+            onClick={async () => {
+              const canvas = await html2canvas(document.body);
+              const screenshot = canvas.toDataURL("image/jpeg");
+              const result = await orchestrator.analyzeAndRespond(screenshot);
+              addMessage(result.llm_response, "assistant", "Screen Analysis", "screen");
+            }}
+            disabled={isLoading || isProcessing}
+            className="bg-green-600 hover:bg-green-700 text-white"
+          >
+            <Monitor className="w-4 h-4" />
           </Button>
         </div>
 

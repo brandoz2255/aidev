@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState, useEffect } from "react"
@@ -26,8 +27,8 @@ export class AIOrchestrator {
       tasks: ["general", "conversation", "creative", "multilingual", "code", "reasoning", "lightweight", "quick-response"],
       speed: 9,
       accuracy: 8,
-      memoryUsage: 1024, // Placeholder, adjust based on actual API usage/cost
-      gpuRequired: false, // API call, not local GPU
+      memoryUsage: 1024,
+      gpuRequired: false,
     },
     {
       name: "mistral",
@@ -97,7 +98,6 @@ export class AIOrchestrator {
       webgl: false,
     }
 
-    // Detect WebGL (GPU) support
     try {
       const canvas = document.createElement("canvas")
       const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl")
@@ -105,7 +105,6 @@ export class AIOrchestrator {
         hardware.webgl = true
         hardware.gpu = true
 
-        // Try to get GPU info
         const debugInfo = gl.getExtension("WEBGL_debug_renderer_info")
         if (debugInfo) {
           const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
@@ -116,7 +115,6 @@ export class AIOrchestrator {
       console.log("WebGL not supported")
     }
 
-    // Detect GPU memory (approximation)
     if (hardware.gpu) {
       hardware.gpuMemory = hardware.totalMemory > 16384 ? 8192 : 4096
     }
@@ -141,16 +139,14 @@ export class AIOrchestrator {
 
   selectOptimalModel(task: string, priority: "speed" | "accuracy" | "balanced" = "balanced"): string {
     if (!this.hardware) {
-      return "mistral" // fallback
+      return "mistral"
     }
 
-    // Filter models that can handle the task
     const suitableModels = this.models.filter((model) =>
       model.tasks.some((t) => t.includes(task.toLowerCase()) || task.toLowerCase().includes(t)),
     )
 
     if (suitableModels.length === 0) {
-      // No specific models for task, use general models
       const generalModels = this.models.filter((model) => model.tasks.includes("general"))
       return this.selectBestModel(generalModels, priority)
     }
@@ -161,7 +157,6 @@ export class AIOrchestrator {
   private selectBestModel(models: ModelCapabilities[], priority: "speed" | "accuracy" | "balanced"): string {
     if (!this.hardware) return models[0]?.name || "mistral"
 
-    // Filter by hardware constraints
     const compatibleModels = models.filter((model) => {
       if (model.gpuRequired && !this.hardware!.gpu) return false
       if (model.memoryUsage > this.hardware!.totalMemory) return false
@@ -169,11 +164,9 @@ export class AIOrchestrator {
     })
 
     if (compatibleModels.length === 0) {
-      // Fallback to lightest model
       return models.sort((a, b) => a.memoryUsage - b.memoryUsage)[0]?.name || "mistral"
     }
 
-    // Score models based on priority
     const scoredModels = compatibleModels.map((model) => {
       let score = 0
       switch (priority) {
@@ -190,7 +183,6 @@ export class AIOrchestrator {
       return { model, score }
     })
 
-    // Return highest scoring model
     scoredModels.sort((a, b) => b.score - a.score)
     return scoredModels[0]?.model.name || "mistral"
   }
@@ -201,6 +193,30 @@ export class AIOrchestrator {
 
   getAllModels(): ModelCapabilities[] {
     return [...this.models]
+  }
+
+  async analyzeAndRespond(imageData: string): Promise<{ commentary: string; llm_response: string }> {
+    try {
+      const response = await fetch("/api/analyze-and-respond", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ image: imageData }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Backend responded with ${response.status}`)
+      }
+
+      return await response.json()
+    } catch (error) {
+      console.error("Analyze and respond API error:", error)
+      return {
+        commentary: "Failed to analyze screen",
+        llm_response: "Could not get a response from the assistant.",
+      }
+    }
   }
 }
 
@@ -216,7 +232,7 @@ export function useAIOrchestrator() {
         const hw = await orchestrator.detectHardware()
         setHardware(hw)
         const fetchedOllamaModels = await orchestrator.fetchOllamaModels()
-        const allModels = [...orchestrator.getAllModels().map(m => m.name), ...fetchedOllamaModels]
+        const allModels = [...orchestrator.getAllModels().map((m) => m.name), ...fetchedOllamaModels]
         setModels(Array.from(new Set(allModels)))
       } catch (error) {
         console.error("Initialization failed:", error)
