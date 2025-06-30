@@ -38,7 +38,7 @@ Cython==3.1.2
 datasets==3.6.0
 dateparser==1.1.8
 debugpy==1.8.14
-decorator==5.2.1
+decorator==5.2.1asdfasdfasdfasdf
 defusedxml==0.7.1
 dill==0.3.8
 distlib==0.3.9
