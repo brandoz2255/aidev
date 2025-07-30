@@ -36,14 +36,12 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
     isLoadingMessages,
     isCreatingSession,
     isHistoryVisible,
-    sessionError,
-    messageError,
+    error,
     fetchSessions,
-    createInstantNewChat,
+    createNewChat,
     selectSession,
     deleteSession,
     updateSessionTitle,
-    fetchSessionMessages,
     toggleHistoryVisibility,
     clearErrors,
   } = useChatHistoryStore()
@@ -53,46 +51,86 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
   const [editTitle, setEditTitle] = useState('')
   const [selectedView, setSelectedView] = useState<'sessions' | 'messages'>('sessions')
 
+  // Fetch sessions on mount only to prevent infinite loops
   useEffect(() => {
     fetchSessions()
-  }, [fetchSessions])
+  }, []) // Empty dependency array to run only on mount
 
+  // Handle external session selection with proper cleanup
   useEffect(() => {
     if (currentSessionId && currentSessionId !== currentSession?.id) {
-      selectSession(currentSessionId)
+      // Use a ref to prevent stale closures
+      const controller = new AbortController()
+      
+      const handleSelection = async () => {
+        try {
+          if (!controller.signal.aborted) {
+            await selectSession(currentSessionId)
+          }
+        } catch (error) {
+          if (!controller.signal.aborted) {
+            console.error('Error selecting session:', error)
+          }
+        }
+      }
+      
+      handleSelection()
+      
+      return () => {
+        controller.abort()
+      }
     }
-  }, [currentSessionId, currentSession?.id, selectSession])
+  }, [currentSessionId, currentSession?.id]) // Remove selectSession from deps
 
   const filteredSessions = useMemo(() => 
     sessions.filter(session =>
       session.title.toLowerCase().includes(searchTerm.toLowerCase())
     ), [sessions, searchTerm]
   )
-
-  const handleCreateSession = useCallback(() => {
-    // 🚀 INSTANT NEW CHAT - ChatGPT-like performance
-    clearErrors() // Clear any previous errors
-    createInstantNewChat() // Instant, no waiting!
-    
-    // Get the new session that was just created
-    const newSession = sessions[0] // It's added to the top
-    if (newSession && onSessionSelect) {
-      onSessionSelect(newSession.id)
+  const handleCreateNewChat = async () => {
+    try {
+      const session = await createNewChat()
+      if (session && onSessionSelect) {
+        onSessionSelect(session.id)
+      }
+    } catch (error) {
+      console.error('Failed to create new chat:', error)
+      // Error is already handled by the store
     }
   }, [createInstantNewChat, onSessionSelect, clearErrors, sessions])
 
-  const handleSessionClick = (session: ChatSession) => {
-    selectSession(session.id)
-    if (onSessionSelect) {
-      onSessionSelect(session.id)
+  const handleSessionClick = async (session: ChatSession) => {
+    try {
+      await selectSession(session.id)
+      if (onSessionSelect) {
+        onSessionSelect(session.id)
+      }
+      setSelectedView('messages')
+    } catch (error) {
+      console.error('Failed to select session:', error)
+      // Error is already handled by the store
     }
-    setSelectedView('messages')
   }
 
   const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (window.confirm('Are you sure you want to delete this chat session?')) {
-      await deleteSession(sessionId)
+    
+    const session = sessions.find(s => s.id === sessionId)
+    const sessionTitle = session?.title || 'this chat session'
+    const messageCount = session?.message_count || 0
+    
+    const confirmMessage = messageCount > 0
+      ? `Are you sure you want to delete "${sessionTitle}"? This will permanently delete ${messageCount} message${messageCount === 1 ? '' : 's'}.`
+      : `Are you sure you want to delete "${sessionTitle}"?`
+    
+    if (window.confirm(confirmMessage)) {
+      try {
+        await deleteSession(sessionId)
+        console.log(`🗑️ Deleted session: ${sessionTitle}`)
+      } catch (error) {
+        console.error('Failed to delete session:', error)
+        alert('Failed to delete chat session. Please try again.')
+      }
     }
   }
 
@@ -219,21 +257,12 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
 
               {/* New Chat Button - Optimized for performance */}
               <Button
-                onClick={handleCreateSession}
-                disabled={isCreatingSession}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-colors duration-150"
+                onClick={handleCreateNewChat}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                disabled={isLoadingSessions}
               >
-                {isCreatingSession ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Creating...
-                  </>
-                ) : (
-                  <>
-                    <Plus className="w-4 h-4 mr-2" />
-                    New Chat
-                  </>
-                )}
+                <Plus className="w-4 h-4 mr-2" />
+                {isLoadingSessions ? 'Creating...' : 'New Chat'}
               </Button>
               
               {/* Session Error Display */}
@@ -270,6 +299,15 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
           )}
         </div>
 
+        {/* Error Display */}
+        {error && (
+          <div className="px-4 pb-2">
+            <div className="p-2 bg-red-900/20 border border-red-500/30 rounded text-red-400 text-sm">
+              {error}
+            </div>
+          </div>
+        )}
+        
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4">
           {selectedView === 'sessions' && (
@@ -290,13 +328,18 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
-                      transition={{ duration: 0.2 }} // Reduced animation duration
-                      className={`relative group cursor-pointer ${
-                        currentSession?.id === session.id ? 'ring-2 ring-blue-500' : ''
+                      className={`relative group cursor-pointer transition-all duration-200 ${
+                        currentSession?.id === session.id 
+                          ? 'ring-2 ring-blue-500 bg-blue-900/30 shadow-lg transform scale-[1.02]' 
+                          : 'hover:bg-gray-800/30'
                       }`}
                       onClick={() => handleSessionClick(session)}
                     >
-                      <Card className="p-3 bg-gray-800/50 hover:bg-gray-800/70 transition-colors">
+                      <Card className={`p-3 transition-all duration-200 ${
+                        currentSession?.id === session.id
+                          ? 'bg-blue-900/20 border border-blue-500/40'
+                          : 'bg-gray-800/50 hover:bg-gray-800/70 border border-gray-700/50'
+                      }`}>
                         <div className="flex items-start justify-between">
                           <div className="flex-1 min-w-0 mr-2">
                             {editingSessionId === session.id ? (
@@ -335,6 +378,12 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
                                     <Badge variant="outline" className="text-xs border-green-500 text-green-400">
                                       {session.model_used}
                                     </Badge>
+                                  )}
+                                  {currentSession?.id === session.id && isLoadingMessages && (
+                                    <div className="flex items-center space-x-1">
+                                      <div className="animate-spin rounded-full h-3 w-3 border border-blue-500 border-t-transparent"></div>
+                                      <span className="text-xs text-blue-400">Loading...</span>
+                                    </div>
                                   )}
                                 </div>
                               </>
