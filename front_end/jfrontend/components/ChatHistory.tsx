@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   MessageSquare, 
@@ -34,6 +34,7 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
     messages,
     isLoadingSessions,
     isLoadingMessages,
+    isCreatingSession,
     isHistoryVisible,
     error,
     fetchSessions,
@@ -42,6 +43,7 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
     deleteSession,
     updateSessionTitle,
     toggleHistoryVisibility,
+    clearErrors,
   } = useChatHistoryStore()
 
   const [searchTerm, setSearchTerm] = useState('')
@@ -80,10 +82,11 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
     }
   }, [currentSessionId, currentSession?.id]) // Remove selectSession from deps
 
-  const filteredSessions = sessions.filter(session =>
-    session.title.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredSessions = useMemo(() => 
+    sessions.filter(session =>
+      session.title.toLowerCase().includes(searchTerm.toLowerCase())
+    ), [sessions, searchTerm]
   )
-
   const handleCreateNewChat = async () => {
     try {
       const session = await createNewChat()
@@ -94,7 +97,7 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
       console.error('Failed to create new chat:', error)
       // Error is already handled by the store
     }
-  }
+  }, [createInstantNewChat, onSessionSelect, clearErrors, sessions])
 
   const handleSessionClick = async (session: ChatSession) => {
     try {
@@ -252,7 +255,7 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
                 />
               </div>
 
-              {/* New Chat Button */}
+              {/* New Chat Button - Optimized for performance */}
               <Button
                 onClick={handleCreateNewChat}
                 className="w-full bg-blue-600 hover:bg-blue-700 text-white"
@@ -261,6 +264,13 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
                 <Plus className="w-4 h-4 mr-2" />
                 {isLoadingSessions ? 'Creating...' : 'New Chat'}
               </Button>
+              
+              {/* Session Error Display */}
+              {sessionError && (
+                <div className="mt-2 p-2 bg-red-900/20 border border-red-500/30 rounded text-xs text-red-400">
+                  {sessionError}
+                </div>
+              )}
             </>
           )}
 
@@ -311,7 +321,7 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
                   {searchTerm ? 'No conversations found' : 'No chat history yet'}
                 </div>
               ) : (
-                <AnimatePresence>
+                <AnimatePresence mode="popLayout">
                   {filteredSessions.map((session) => (
                     <motion.div
                       key={session.id}
@@ -411,9 +421,20 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
 
           {selectedView === 'messages' && (
             <div className="space-y-3">
+              {/* Message Error Display */}
+              {messageError && (
+                <div className="p-3 bg-red-900/20 border border-red-500/30 rounded text-sm text-red-400 text-center">
+                  {messageError}
+                </div>
+              )}
+              
               {isLoadingMessages ? (
                 <div className="flex items-center justify-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                </div>
+              ) : messageError ? (
+                <div className="text-center py-8 text-gray-400">
+                  Unable to load messages
                 </div>
               ) : messages.length === 0 ? (
                 <div className="text-center py-8 text-gray-400">
