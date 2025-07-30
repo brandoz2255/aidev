@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   MessageSquare, 
@@ -34,14 +34,18 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
     messages,
     isLoadingSessions,
     isLoadingMessages,
+    isCreatingSession,
     isHistoryVisible,
+    sessionError,
+    messageError,
     fetchSessions,
-    createSession,
+    createInstantNewChat,
     selectSession,
     deleteSession,
     updateSessionTitle,
     fetchSessionMessages,
     toggleHistoryVisibility,
+    clearErrors,
   } = useChatHistoryStore()
 
   const [searchTerm, setSearchTerm] = useState('')
@@ -59,16 +63,23 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
     }
   }, [currentSessionId, currentSession?.id, selectSession])
 
-  const filteredSessions = sessions.filter(session =>
-    session.title.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredSessions = useMemo(() => 
+    sessions.filter(session =>
+      session.title.toLowerCase().includes(searchTerm.toLowerCase())
+    ), [sessions, searchTerm]
   )
 
-  const handleCreateSession = async () => {
-    const session = await createSession()
-    if (session && onSessionSelect) {
-      onSessionSelect(session.id)
+  const handleCreateSession = useCallback(() => {
+    // 🚀 INSTANT NEW CHAT - ChatGPT-like performance
+    clearErrors() // Clear any previous errors
+    createInstantNewChat() // Instant, no waiting!
+    
+    // Get the new session that was just created
+    const newSession = sessions[0] // It's added to the top
+    if (newSession && onSessionSelect) {
+      onSessionSelect(newSession.id)
     }
-  }
+  }, [createInstantNewChat, onSessionSelect, clearErrors, sessions])
 
   const handleSessionClick = (session: ChatSession) => {
     selectSession(session.id)
@@ -206,14 +217,31 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
                 />
               </div>
 
-              {/* New Chat Button */}
+              {/* New Chat Button - Optimized for performance */}
               <Button
                 onClick={handleCreateSession}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                disabled={isCreatingSession}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-colors duration-150"
               >
-                <Plus className="w-4 h-4 mr-2" />
-                New Chat
+                {isCreatingSession ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 mr-2" />
+                    New Chat
+                  </>
+                )}
               </Button>
+              
+              {/* Session Error Display */}
+              {sessionError && (
+                <div className="mt-2 p-2 bg-red-900/20 border border-red-500/30 rounded text-xs text-red-400">
+                  {sessionError}
+                </div>
+              )}
             </>
           )}
 
@@ -255,13 +283,14 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
                   {searchTerm ? 'No conversations found' : 'No chat history yet'}
                 </div>
               ) : (
-                <AnimatePresence>
+                <AnimatePresence mode="popLayout">
                   {filteredSessions.map((session) => (
                     <motion.div
                       key={session.id}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.2 }} // Reduced animation duration
                       className={`relative group cursor-pointer ${
                         currentSession?.id === session.id ? 'ring-2 ring-blue-500' : ''
                       }`}
@@ -343,9 +372,20 @@ export default function ChatHistory({ onSessionSelect, currentSessionId }: ChatH
 
           {selectedView === 'messages' && (
             <div className="space-y-3">
+              {/* Message Error Display */}
+              {messageError && (
+                <div className="p-3 bg-red-900/20 border border-red-500/30 rounded text-sm text-red-400 text-center">
+                  {messageError}
+                </div>
+              )}
+              
               {isLoadingMessages ? (
                 <div className="flex items-center justify-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                </div>
+              ) : messageError ? (
+                <div className="text-center py-8 text-gray-400">
+                  Unable to load messages
                 </div>
               ) : messages.length === 0 ? (
                 <div className="text-center py-8 text-gray-400">

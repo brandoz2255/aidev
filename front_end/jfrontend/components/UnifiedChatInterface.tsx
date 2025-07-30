@@ -31,6 +31,8 @@ import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useAIOrchestrator } from "./AIOrchestrator"
 import { useAIInsights } from "@/hooks/useAIInsights"
+import { useSessionIsolationValidation } from "@/hooks/useSessionIsolationValidation"
+import { validateMessagePersistenceIsolation } from "@/lib/sessionIsolationValidator"
 import ChatHistory from "./ChatHistory"
 import { useChatHistoryStore } from "@/stores/chatHistoryStore"
 import AuthStatus from "./AuthStatus"
@@ -78,8 +80,22 @@ const UnifiedChatInterface = forwardRef<ChatHandle, {}>((props, ref) => {
   
   const { logUserInteraction, completeInsight, logReasoningProcess } = useAIInsights()
   
+  // Session isolation validation - reduced frequency for better performance
+  const { validateUISync, validateCurrentState } = useSessionIsolationValidation({
+    enableAutoValidation: process.env.NODE_ENV === 'development', // Only in development
+    validationInterval: 30000 // Reduced from 3 seconds to 30 seconds
+  })
+  
   // Chat history integration
-  const { currentSession, createSession, isHistoryVisible } = useChatHistoryStore()
+  const { 
+    currentSession, 
+    messages: storeMessages, 
+    isLoadingMessages,
+    messageError,
+    createNewSession, 
+    isHistoryVisible,
+    clearCurrentMessages 
+  } = useChatHistoryStore()
   const [sessionId, setSessionId] = useState<string | null>(null)
   
   const [selectedModel, setSelectedModel] = useState("auto")
@@ -124,14 +140,9 @@ const UnifiedChatInterface = forwardRef<ChatHandle, {}>((props, ref) => {
   // Expose method to add AI messages from external components
   useImperativeHandle(ref, () => ({
     addAIMessage: (content: string, source = "AI") => {
-      const aiMessage: Message = {
-        role: "assistant",
-        content: content,
-        timestamp: new Date(),
-        model: source,
-        inputType: "screen",
-      }
-      setMessages((prev) => [...prev, aiMessage])
+      // This method should now work through the store instead of local state
+      // For now, we'll keep this as a placeholder - external components should use the store directly
+      console.warn("addAIMessage called - external components should use the chat history store directly")
     },
   }))
 
@@ -150,14 +161,44 @@ const UnifiedChatInterface = forwardRef<ChatHandle, {}>((props, ref) => {
     }
   }, [currentSession?.id, sessionId])
 
+  // Sync local messages with store messages when session changes
+  useEffect(() => {
+    if (currentSession?.id) {
+      // Convert store messages to local message format for compatibility
+      const convertedMessages: Message[] = storeMessages.map(msg => ({
+        role: msg.role as "user" | "assistant",
+        content: msg.content,
+        timestamp: msg.created_at ? new Date(msg.created_at) : new Date(),
+        model: msg.model_used,
+        inputType: msg.input_type as "text" | "voice" | "screen",
+        searchResults: msg.metadata?.searchResults,
+        searchQuery: msg.metadata?.searchQuery,
+      }))
+      setMessages(convertedMessages)
+      
+      // Only validate UI synchronization in development mode
+      if (process.env.NODE_ENV === 'development') {
+        setTimeout(() => {
+          const validation = validateUISync(sessionId || undefined, convertedMessages)
+          if (!validation.isValid) {
+            console.error('UI synchronization validation failed after message sync:', validation.errors)
+          }
+        }, 100)
+      }
+    } else {
+      // Clear messages when no session is selected
+      setMessages([])
+    }
+  }, [storeMessages, currentSession?.id, validateUISync, sessionId])
+
   const handleCreateSession = useCallback(async () => {
     if (!sessionId) {
-      const newSession = await createSession('New Chat', selectedModel)
+      const newSession = await createNewSession('New Chat', selectedModel)
       if (newSession) {
         setSessionId(newSession.id)
       }
     }
-  }, [sessionId, selectedModel, createSession])
+  }, [sessionId, selectedModel, createNewSession])
 
   // Create new session when first message is sent and no session exists
   useEffect(() => {
@@ -167,12 +208,62 @@ const UnifiedChatInterface = forwardRef<ChatHandle, {}>((props, ref) => {
   }, [messages.length, sessionId, currentSession, handleCreateSession])
 
   const handleSessionSelect = (selectedSessionId: string) => {
+    const previousSessionId = sessionId
     setSessionId(selectedSessionId)
-    // Note: Don't clear messages here - let the store handle message loading
+    
+    // Only validate in development mode to reduce production overhead
+    if (process.env.NODE_ENV === 'development') {
+      setTimeout(() => {
+        const validation = validateCurrentState()
+        if (!validation.isValid) {
+          console.error('Session switch validation failed:', validation.errors)
+        }
+        
+        // Also validate UI synchronization
+        const uiValidation = validateUISync(selectedSessionId, messages)
+        if (!uiValidation.isValid) {
+          console.error('UI synchronization validation failed after session switch:', uiValidation.errors)
+        }
+      }, 200)
+    }
   }
 
   const persistMessage = async (message: Message, reasoning?: string) => {
-    if (!sessionId) return
+    if (!sessionId) {
+      console.error('Cannot persist message: no session ID')
+      return
+    }
+
+    // Create a ChatMessage object for validation
+    const chatMessage = {
+      session_id: sessionId,
+      user_id: 0, // Will be set by backend
+      role: message.role,
+      content: message.content,
+      reasoning: reasoning,
+      model_used: message.model,
+      input_type: message.inputType || 'text',
+      metadata: {
+        timestamp: message.timestamp.toISOString(),
+        ...(message.searchResults && { searchResults: message.searchResults }),
+        ...(message.searchQuery && { searchQuery: message.searchQuery }),
+      },
+      created_at: message.timestamp.toISOString()
+    }
+
+    // Only validate message persistence in development mode
+    if (process.env.NODE_ENV === 'development') {
+      const validation = validateMessagePersistenceIsolation(
+        chatMessage,
+        sessionId,
+        storeMessages
+      )
+      
+      if (!validation.isValid) {
+        console.error('Message persistence validation failed:', validation.errors)
+        return
+      }
+    }
 
     try {
       const token = localStorage.getItem('token')
@@ -207,6 +298,8 @@ const UnifiedChatInterface = forwardRef<ChatHandle, {}>((props, ref) => {
 
       if (!response.ok) {
         console.error('Failed to persist message:', response.statusText)
+      } else {
+        console.log('Message persisted successfully to session:', sessionId)
       }
     } catch (error) {
       console.error('Error persisting message:', error)
@@ -725,6 +818,25 @@ const UnifiedChatInterface = forwardRef<ChatHandle, {}>((props, ref) => {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Message Error Display */}
+        {messageError && (
+          <div className="flex justify-center">
+            <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-4 text-center">
+              <p className="text-red-400 text-sm">{messageError}</p>
+            </div>
+          </div>
+        )}
+        
+        {/* Session Loading Display */}
+        {isLoadingMessages && (
+          <div className="flex justify-center py-8">
+            <div className="flex items-center space-x-3">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
+              <span className="text-gray-400 text-sm">Loading chat history...</span>
+            </div>
+          </div>
+        )}
+        
         <AnimatePresence>
           {messages.map((message, index) => (
             <motion.div
